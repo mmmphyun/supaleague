@@ -18,7 +18,7 @@ if [ "$BRANCH" = "main" ] && [ "$HAS_COMMITS" -eq 1 ]; then
     exit 1
 fi
 
-# 2. 이미 머지된 브랜치 재사용 방어 (Stale Branch Guard)
+# 2. 이미 머지된 브랜치 재사용 방어 (Stale Branch Guard) 및 이전 작업 브랜치 파생 방어
 if [ "$HAS_COMMITS" -eq 1 ] && [ "$BRANCH" != "main" ]; then
     if git rev-parse --verify main >/dev/null 2>&1; then
         HEAD_SHA=$(git rev-parse HEAD)
@@ -33,6 +33,19 @@ if [ "$HAS_COMMITS" -eq 1 ] && [ "$BRANCH" != "main" ]; then
                 exit 1
             fi
         fi
+
+        # 다른 미머지 로컬 브랜치로부터 파생되었는지 검사 (Branch Chaining Guard)
+        OTHER_BRANCHES=$(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -v -E "^(main|$BRANCH)$" || true)
+        for other in $OTHER_BRANCHES; do
+            if git merge-base --is-ancestor "$other" HEAD; then
+                if ! git merge-base --is-ancestor "$other" main; then
+                    echo "[ERROR] 브랜치 오염 감지: 현재 브랜치는 미머지 브랜치('$other')에서 파생되었습니다."
+                    echo "새 작업은 반드시 'main'에서 직접 분기해야 합니다:"
+                    echo "  git checkout main && git checkout -b feat/<work-name>"
+                    exit 1
+                fi
+            fi
+        done
     fi
 fi
 
@@ -71,9 +84,9 @@ if [ -f "./gradlew.bat" ] || [ -f "./gradlew" ]; then
     if [ -n "$AFFECTED_CORE" ]; then
         echo "[pre-commit] 순수 JVM 도메인 단위 테스트 고속 실행 중..."
         if [ -f "./gradlew.bat" ]; then
-            cmd.exe /c "gradlew.bat :core:physics:test :core:stats:test --daemon -q"
+            cmd.exe /c "gradlew.bat checkDomainPurity :core:physics:test :core:stats:test --daemon -q"
         else
-            ./gradlew :core:physics:test :core:stats:test --daemon -q
+            ./gradlew checkDomainPurity :core:physics:test :core:stats:test --daemon -q
         fi
         if [ $? -ne 0 ]; then
             echo "[ERROR] 순수 도메인 단위 테스트 실패! 오류를 해결한 후 커밋하십시오."
