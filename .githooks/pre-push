@@ -1,0 +1,80 @@
+#!/bin/sh
+set -e
+
+# git commit --no-verify 우회 시도를 원천 무력화하는 pre-push 하드 가드
+REMOTE="$1"
+URL="$2"
+
+echo "[pre-push] 푸시 전 커밋 무결성 및 --no-verify 우회 여부 검증 시작..."
+
+ZERO_COMMIT="0000000000000000000000000000000000000000"
+
+while read local_ref local_sha remote_ref remote_sha; do
+    if [ "$local_sha" = "$ZERO_COMMIT" ]; then
+        # 브랜치 삭제 요청은 통과
+        continue
+    fi
+
+    # 검증 대상 커밋 범위 결정
+    if [ "$remote_sha" = "$ZERO_COMMIT" ]; then
+        # 신규 브랜치 푸시인 경우 main과의 분기점부터 검증
+        if git rev-parse --verify main >/dev/null 2>&1; then
+            RANGE="main..$local_sha"
+        else
+            RANGE="$local_sha"
+        fi
+    else
+        RANGE="$remote_sha..$local_sha"
+    fi
+
+    COMMITS=$(git rev-list $RANGE)
+    if [ -z "$COMMITS" ]; then
+        continue
+    fi
+
+    # 1. 푸시 대상 모든 커밋의 메시지 컨벤션 강제 검증 (--no-verify 우회 차단)
+    for commit in $COMMITS; do
+        MSG=$(git log -1 --format=%B $commit)
+        python - "$MSG" << 'EOF'
+import sys
+import re
+
+msg = sys.argv[1].strip()
+lines = [l.strip() for l in msg.splitlines() if l.strip() and not l.startswith("#")]
+if not lines:
+    print("[ERROR] 커밋 메시지가 비어 있습니다.")
+    sys.exit(1)
+
+subject = lines[0]
+pattern = r"^(feat|fix|refactor|docs|chore|test|style|perf|ci)(\([a-z0-9_\-\/]+\))?!?: (.+)$"
+match = re.match(pattern, subject)
+
+if not match or subject.endswith(".") or not re.search(r"[\uac00-\ud7a3\u3131-\u318e]", match.group(3)):
+    print(f"[ERROR] 푸시 거부: --no-verify로 우회된 비표준 커밋 탐지!")
+    print(f"  커밋 해시: {sys.argv[1][:8]}")
+    print(f"  커밋 제목: '{subject}'")
+    print("형식: <type>(<scope>): <한글 요약> (마침표 제외)")
+    sys.exit(1)
+EOF
+        if [ $? -ne 0 ]; then
+            exit 1
+        fi
+    done
+
+    # 2. 순수 도메인 단위 테스트 최종 무결성 검증
+    if [ -f "./gradlew.bat" ] || [ -f "./gradlew" ]; then
+        echo "[pre-push] 전체 순수 도메인 단위 테스트(:core:physics, :core:stats) 실행 중..."
+        if [ -f "./gradlew.bat" ]; then
+            cmd.exe /c "gradlew.bat :core:physics:test :core:stats:test --daemon -q"
+        else
+            ./gradlew :core:physics:test :core:stats:test --daemon -q
+        fi
+        if [ $? -ne 0 ]; then
+            echo "[ERROR] 푸시 거부: 순수 도메인 단위 테스트 실패!"
+            exit 1
+        fi
+    fi
+done
+
+echo "[pre-push] 모든 푸시 검증 통과."
+exit 0

@@ -1,0 +1,78 @@
+#!/bin/sh
+set -e
+
+echo "[pre-commit] 로컬 하드 가드 사전 검증 시작..."
+
+# 1. 브랜치 검증: main 브랜치 직접 커밋 차단
+BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || true)
+
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+    HAS_COMMITS=1
+else
+    HAS_COMMITS=0
+fi
+
+if [ "$BRANCH" = "main" ] && [ "$HAS_COMMITS" -eq 1 ]; then
+    echo "[ERROR] 'main' 브랜치에 직접 커밋할 수 없습니다."
+    echo "작업 브랜치를 생성하십시오: git checkout -b feat/<work-name>"
+    exit 1
+fi
+
+# 2. 이미 머지된 브랜치 재사용 방어 (Stale Branch Guard)
+if [ "$HAS_COMMITS" -eq 1 ] && [ "$BRANCH" != "main" ]; then
+    if git rev-parse --verify main >/dev/null 2>&1; then
+        if git merge-base --is-ancestor HEAD main; then
+            echo "[ERROR] 현재 브랜치('$BRANCH')는 이미 'main'에 머지된 종료 브랜치입니다."
+            echo "종료된 브랜치에서의 추가 작업은 브랜치 오염을 유발합니다."
+            echo "최신 main으로 이동 후 새 브랜치를 분기하십시오:"
+            echo "  git checkout main && git pull origin main && git checkout -b feat/<work-name>"
+            exit 1
+        fi
+    fi
+fi
+
+# 3. 보안 검증: 시크릿 / 비밀키 파일 유출 차단 (.githooks 디렉토리 자체는 제외)
+FORBIDDEN_FILES='(\.env$|\.secret$|\.key$|\.pem$|id_rsa|velocity\.secret)'
+STAGED_FILES=$(git diff --cached --name-only -- . ':(exclude).githooks')
+
+for file in $STAGED_FILES; do
+    if echo "$file" | grep -Eq "$FORBIDDEN_FILES"; then
+        echo "[ERROR] 보안 위반: 시크릿 파일('$file')이 커밋 대상에 포함되어 있습니다."
+        exit 1
+    fi
+done
+
+if git diff --cached -S"BEGIN"" PRIVATE KEY" --name-only -- . ':(exclude).githooks' | grep -q .; then
+    echo "[ERROR] 보안 위반: Staged 코드 내 비공개 키(Private Key)가 탐지되었습니다."
+    exit 1
+fi
+
+# 4. 대용량 바이너리 및 서버 파일 유입 차단
+FORBIDDEN_EXT='(\.jar$|\.mca$|\.tar\.gz$|\.zip$)'
+for file in $STAGED_FILES; do
+    if echo "$file" | grep -Eq "$FORBIDDEN_EXT"; then
+        echo "[ERROR] 바이너리 유입 위반: 차단된 파일 형식('$file')입니다."
+        echo "서버 Jar 및 월드 데이터(.mca)는 Git에 커밋할 수 없습니다."
+        exit 1
+    fi
+done
+
+# 5. Fast-Feedback: 순수 JVM 도메인 단위 테스트 (:core:physics, :core:stats)
+if [ -f "./gradlew.bat" ] || [ -f "./gradlew" ]; then
+    AFFECTED_CORE=$(echo "$STAGED_FILES" | grep -E '^(core/|build\.gradle|settings\.gradle)' || true)
+    if [ -n "$AFFECTED_CORE" ]; then
+        echo "[pre-commit] 순수 JVM 도메인 단위 테스트 고속 실행 중..."
+        if [ -f "./gradlew.bat" ]; then
+            cmd.exe /c "gradlew.bat :core:physics:test :core:stats:test --daemon -q"
+        else
+            ./gradlew :core:physics:test :core:stats:test --daemon -q
+        fi
+        if [ $? -ne 0 ]; then
+            echo "[ERROR] 순수 도메인 단위 테스트 실패! 오류를 해결한 후 커밋하십시오."
+            exit 1
+        fi
+    fi
+fi
+
+echo "[pre-commit] 모든 사전 검증 통과."
+exit 0
