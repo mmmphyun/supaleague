@@ -21,12 +21,17 @@ fi
 # 2. 이미 머지된 브랜치 재사용 방어 (Stale Branch Guard)
 if [ "$HAS_COMMITS" -eq 1 ] && [ "$BRANCH" != "main" ]; then
     if git rev-parse --verify main >/dev/null 2>&1; then
-        if git merge-base --is-ancestor HEAD main; then
-            echo "[ERROR] 현재 브랜치('$BRANCH')는 이미 'main'에 머지된 종료 브랜치입니다."
-            echo "종료된 브랜치에서의 추가 작업은 브랜치 오염을 유발합니다."
-            echo "최신 main으로 이동 후 새 브랜치를 분기하십시오:"
-            echo "  git checkout main && git pull origin main && git checkout -b feat/<work-name>"
-            exit 1
+        HEAD_SHA=$(git rev-parse HEAD)
+        MAIN_SHA=$(git rev-parse main)
+        # HEAD가 main과 완전히 같으면 main에서 새로 분기된 신규 작업 브랜치이므로 허용
+        if [ "$HEAD_SHA" != "$MAIN_SHA" ]; then
+            if git merge-base --is-ancestor HEAD main; then
+                echo "[ERROR] 현재 브랜치('$BRANCH')는 이미 'main'에 머지된 종료 브랜치입니다."
+                echo "종료된 브랜치에서의 추가 작업은 브랜치 오염을 유발합니다."
+                echo "최신 main으로 이동 후 새 브랜치를 분기하십시오:"
+                echo "  git checkout main && git pull origin main && git checkout -b feat/<work-name>"
+                exit 1
+            fi
         fi
     fi
 fi
@@ -47,9 +52,12 @@ if git diff --cached -S"BEGIN"" PRIVATE KEY" --name-only -- . ':(exclude).githoo
     exit 1
 fi
 
-# 4. 대용량 바이너리 및 서버 파일 유입 차단
+# 4. 대용량 바이너리 및 서버 파일 유입 차단 (gradle-wrapper.jar 제외)
 FORBIDDEN_EXT='(\.jar$|\.mca$|\.tar\.gz$|\.zip$)'
 for file in $STAGED_FILES; do
+    if [ "$file" = "gradle/wrapper/gradle-wrapper.jar" ]; then
+        continue
+    fi
     if echo "$file" | grep -Eq "$FORBIDDEN_EXT"; then
         echo "[ERROR] 바이너리 유입 위반: 차단된 파일 형식('$file')입니다."
         echo "서버 Jar 및 월드 데이터(.mca)는 Git에 커밋할 수 없습니다."
