@@ -55,6 +55,7 @@ jobs:
               - 'gradle.properties'
               - 'gradle/**'
               - 'gradlew*'
+              - '**/build.gradle.kts'
 
   lint-docs:
     name: Lint Documentation
@@ -168,7 +169,7 @@ jobs:
   security-scan:
     name: Security Vulnerability Scan (Trivy)
     needs: changes
-    if: needs.changes.outputs.infra == 'true' || needs.changes.outputs.build_system == 'true'
+    if: needs.changes.outputs.infra == 'true' || needs.changes.outputs.build_system == 'true' || needs.changes.outputs.apps_arena == 'true' || needs.changes.outputs.apps_proxy == 'true' || needs.changes.outputs.apps_orchestrator == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
