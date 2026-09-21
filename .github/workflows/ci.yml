@@ -2,6 +2,7 @@ name: CI Gate & Monorepo Guard
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
     branches: [ main ]
   push:
     branches: [ main ]
@@ -182,9 +183,44 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
 
+  lint-pr-title:
+    name: Validate PR Title Convention
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR Title against Convention
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          python3 -c "
+          import os, re, sys
+
+          title = os.environ.get('PR_TITLE', '').strip()
+          print(f'[lint-pr-title] Checking PR Title: \"{title}\"')
+
+          pattern = r'^(feat|fix|refactor|docs|chore|test|style|perf|ci|infra)(\([a-z0-9_\-\/]+\))?!?: (.+)$'
+          match = re.match(pattern, title)
+
+          if not match:
+              print('[ERROR] PR 제목 규격 위반! 형식: <type>(<scope>): <한글 요약>', file=sys.stderr)
+              print('허용 Type: feat, fix, refactor, docs, chore, test, style, perf, ci, infra', file=sys.stderr)
+              sys.exit(1)
+
+          summary = match.group(3).strip()
+          if summary.endswith('.'):
+              print('[ERROR] PR 제목 끝에는 마침표(.)를 사용할 수 없습니다.', file=sys.stderr)
+              sys.exit(1)
+
+          if not re.search(r'[\uac00-\ud7a3\u3131-\u318e]', summary):
+              print('[ERROR] PR 제목 요약은 명확한 한국어(한글)로 작성해야 합니다.', file=sys.stderr)
+              sys.exit(1)
+
+          print('[SUCCESS] PR 제목 컨벤션 검증 완료.')
+          "
+
   ci-gate:
     name: CI Gate (Required Status Check)
-    needs: [changes, lint-docs, check-core, build-arena, build-proxy, build-orchestrator, security-scan]
+    needs: [changes, lint-docs, check-core, build-arena, build-proxy, build-orchestrator, security-scan, lint-pr-title]
     if: always()
     runs-on: ubuntu-latest
     steps:
