@@ -46,14 +46,25 @@ if [ "$HAS_COMMITS" -eq 1 ] && [ "$BRANCH" != "main" ]; then
             fi
         fi
 
-        # 다른 미머지 로컬 브랜치로부터 파생되었는지 검사 (Branch Chaining Guard)
-        OTHER_BRANCHES=$(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -v -E "^(main|$BRANCH)$" || true)
+        # 다른 미머지 로컬 및 원격 추적 브랜치로부터 파생되었는지 검사 (Branch Chaining Guard)
+        OTHER_BRANCHES=$(git for-each-ref --format='%(refname:short)' refs/heads/ refs/remotes/origin/ | grep -v -E "^(main|origin/main|origin/HEAD|$BRANCH|origin/$BRANCH)$" || true)
         for other in $OTHER_BRANCHES; do
             if git merge-base --is-ancestor "$other" HEAD; then
-                if ! git merge-base --is-ancestor "$other" main; then
+                # main 또는 origin/main에 머지되었는지 확인
+                IS_MERGED_LOCAL=0
+                IS_MERGED_REMOTE=0
+                if git merge-base --is-ancestor "$other" main; then
+                    IS_MERGED_LOCAL=1
+                fi
+                if git rev-parse --verify origin/main >/dev/null 2>&1; then
+                    if git merge-base --is-ancestor "$other" origin/main; then
+                        IS_MERGED_REMOTE=1
+                    fi
+                fi
+                if [ "$IS_MERGED_LOCAL" -eq 0 ] && [ "$IS_MERGED_REMOTE" -eq 0 ]; then
                     echo "[ERROR] 브랜치 오염 감지: 현재 브랜치는 미머지 브랜치('$other')에서 파생되었습니다."
                     echo "새 작업은 반드시 'main'에서 직접 분기해야 합니다:"
-                    echo "  git checkout main && git checkout -b feat/<work-name>"
+                    echo "  git checkout main && git pull origin main && git checkout -b feat/<work-name>"
                     exit 1
                 fi
             fi

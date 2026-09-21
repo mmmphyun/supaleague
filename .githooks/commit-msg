@@ -24,13 +24,13 @@ if not lines:
 subject = lines[0]
 
 # 정규식 패턴: <type>(<scope>): <한글 요약> 또는 <type>: <한글 요약>
-pattern = r"^(feat|fix|refactor|docs|chore|test|style|perf|ci)(\([a-z0-9_\-\/]+\))?!?: (.+)$"
+pattern = r"^(feat|fix|refactor|docs|chore|test|style|perf|ci|infra)(\([a-z0-9_\-\/]+\))?!?: (.+)$"
 match = re.match(pattern, subject)
 
 if not match:
     print("[ERROR] 커밋 메시지 규격 위반!")
     print("형식: <type>(<scope>): <한글 요약>")
-    print("허용 Type: feat, fix, refactor, docs, chore, test, style, perf, ci")
+    print("허용 Type: feat, fix, refactor, docs, chore, test, style, perf, ci, infra")
     print(f"입력된 메시지: '{subject}'")
     sys.exit(1)
 
@@ -49,7 +49,20 @@ if not has_hangul:
     print(f"입력된 메시지: '{subject}'")
     sys.exit(1)
 
-print("[commit-msg] 커밋 메시지 컨벤션 검증 통과.")
+# 전체 메시지 본문(Body) 시크릿 누출 방어
+full_text = "\n".join(lines)
+secret_patterns = [
+    r"BEGIN (?:RSA|OPENSSH|EC|DSA|PGP|PRIVATE) KEY",
+    r"ghp_[a-zA-Z0-9]{36}",
+    r"gho_[a-zA-Z0-9]{36}",
+    r"velocity\.secret\s*=\s*[a-zA-Z0-9]+",
+]
+for sp in secret_patterns:
+    if re.search(sp, full_text, re.IGNORECASE):
+        print(f"[ERROR] 보안 위반: 커밋 메시지 본문에 시크릿/비밀키 패턴이 탐지되었습니다!")
+        sys.exit(1)
+
+print("[commit-msg] 커밋 메시지 컨벤션 및 보안 검증 통과.")
 sys.exit(0)
 EOF
 
