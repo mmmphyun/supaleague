@@ -65,9 +65,9 @@ EOF
     if [ -f "./gradlew.bat" ] || [ -f "./gradlew" ]; then
         echo "[pre-push] 전체 순수 도메인 단위 테스트(:core:physics, :core:stats) 실행 중..."
         if [ -f "./gradlew.bat" ]; then
-            cmd.exe /c "gradlew.bat :core:physics:test :core:stats:test --daemon -q"
+            cmd.exe /c "gradlew.bat checkDomainPurity :core:physics:test :core:stats:test --daemon -q"
         else
-            ./gradlew :core:physics:test :core:stats:test --daemon -q
+            ./gradlew checkDomainPurity :core:physics:test :core:stats:test --daemon -q
         fi
         if [ $? -ne 0 ]; then
             echo "[ERROR] 푸시 거부: 순수 도메인 단위 테스트 실패!"
